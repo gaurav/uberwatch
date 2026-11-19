@@ -13,9 +13,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("command", choices=["fetch"])
     parser.add_argument("repo", help="owner/name, for example NCATSTranslator/Babel")
     parser.add_argument("--data", type=Path, default=DATA_ROOT, help="scratch directory (default: data)")
+    parser.add_argument("--full", action="store_true", help="re-fetch items even if they have not changed")
     args = parser.parse_args(argv)
 
-    fetch_repo(args.repo, root=args.data)
+    fetch_repo(args.repo, root=args.data, full=args.full)
 
 
 if __name__ == "__main__":

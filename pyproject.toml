@@ -34,3 +34,5 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# GraphQL is all braces, so `%` formatting reads better than doubling every one for str.format.
+ignore = ["UP031"]

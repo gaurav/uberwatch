@@ -6,20 +6,34 @@ Output, under data/<owner>/<repo>/raw/:
     pulls.jsonl    paged connections are flattened: `timeline`, `files`, `commits` are plain lists
     meta.json      when the fetch ran, the repository's milestones and labels, GitHub's own totals
 
-This is a full re-fetch every time. At ~50 issues or ~20 pull requests a request that is a few
-dozen requests for a repository with a thousand items, so it has not been worth building an
-incremental sync (ask for items ordered by UPDATED_AT and stop at the last fetch's watermark).
+Two passes. The first lists every item's node ID and `updatedAt`, a hundred to a request. The
+second loads each item that is new or has changed since the copy on disk, ONE ITEM PER REQUEST,
+a few requests at a time. A first fetch therefore costs one request per item; later ones cost
+about one per item touched since.
+
+Do not batch the second pass. Selecting `timelineItems` for many items in one request, whether
+inside `repository.issues(first: 50)` or `nodes(ids: [...50 ids])`, silently returns incomplete
+timelines: the newest events are left out, `hasNextPage` is false, and for issues even
+`totalCount` is reduced to match, so nothing in the response says anything is missing. On
+NCATSTranslator/Babel that hid the latest milestone change of 168 of 770 issues. Batches of 25
+issues happened to come back whole and batches of 20 pull requests did not, so there is no batch
+size to trust; a request for a single item returns everything. Checked 2026-11-19.
+
+`timelineItems.totalCount` is no use as a completeness check either: on a pull request it counts
+every timeline item, ignoring the `itemTypes` filter. What does check the fetch is the replay in
+events.py, which has to arrive at the state GitHub reports now.
 """
 
 from __future__ import annotations
 
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .github import Client, TransientGitHubError
+from .github import Client
 
 DATA_ROOT = Path("data")
 
@@ -78,8 +92,7 @@ _COMMON_TYPES = (
     "CONNECTED_EVENT, ISSUE_COMMENT"
 )
 _PR_TYPES = (
-    _COMMON_TYPES
-    + ", MERGED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, REVIEW_REQUESTED_EVENT, "
+    _COMMON_TYPES + ", MERGED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, REVIEW_REQUESTED_EVENT, "
     "PULL_REQUEST_REVIEW"
 )
 
@@ -131,15 +144,22 @@ _PR_NODE = (
     % (_PR_TYPES, _PR_TIMELINE)
 )
 
-_LIST_QUERY = """
-query($owner: String!, $name: String!, $first: Int!, $cursor: String) {
+_IDS_QUERY = """
+query($owner: String!, $name: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
-    %(connection)s(first: $first, after: $cursor, orderBy: {field: CREATED_AT, direction: ASC}) {
+    %(connection)s(first: 100, after: $cursor, orderBy: {field: CREATED_AT, direction: ASC}) {
       totalCount
       pageInfo { hasNextPage endCursor }
-      nodes { %(node)s }
+      nodes { id number updatedAt }
     }
   }
+  rateLimit { cost remaining resetAt }
+}
+"""
+
+_NODE_QUERY = """
+query($id: ID!) {
+  node(id: $id) { ... on %(type)s { %(node)s } }
   rateLimit { cost remaining resetAt }
 }
 """
@@ -194,20 +214,32 @@ query($owner: String!, $name: String!) {
 MAX_FILES = 1000
 
 
-def fetch_repo(repo: str, *, root: Path = DATA_ROOT, client: Client | None = None) -> Path:
+# Bump when the selection changes, so copies fetched with the old one are not reused.
+RAW_SCHEMA = 2
+
+# Simultaneous requests. GitHub's secondary rate limit allows many more, but this is polite and
+# already finishes a thousand items in about a minute.
+WORKERS = 6
+
+
+def fetch_repo(
+    repo: str, *, root: Path = DATA_ROOT, client: Client | None = None, full: bool = False
+) -> Path:
     owner, name = split_repo(repo)
     own_client = client is None
     client = client or Client()
     raw = repo_dir(repo, root) / "raw"
     raw.mkdir(parents=True, exist_ok=True)
+    reuse = not full and _stored_schema(raw) == RAW_SCHEMA
     try:
         meta = client.graphql(_META_QUERY, {"owner": owner, "name": name})["repository"]
         meta["milestones"] = meta["milestones"]["nodes"]
         meta["labels"] = meta["labels"]["nodes"]
         meta["fetchedAt"] = datetime.now(UTC).isoformat(timespec="seconds")
+        meta["schema"] = RAW_SCHEMA
 
-        issues = _fetch_all(client, owner, name, "issues", _ISSUE_NODE, page_size=50)
-        pulls = _fetch_all(client, owner, name, "pullRequests", _PR_NODE, page_size=20)
+        issues = _fetch_all(client, owner, name, "issues", raw / "issues.jsonl", reuse)
+        pulls = _fetch_all(client, owner, name, "pullRequests", raw / "pulls.jsonl", reuse)
     finally:
         if own_client:
             client.close()
@@ -223,32 +255,54 @@ def fetch_repo(repo: str, *, root: Path = DATA_ROOT, client: Client | None = Non
     return raw
 
 
+def _stored_schema(raw: Path) -> int | None:
+    try:
+        return json.loads((raw / "meta.json").read_text()).get("schema")
+    except (OSError, ValueError):
+        return None
+
+
 def _fetch_all(
-    client: Client, owner: str, name: str, connection: str, node: str, *, page_size: int
+    client: Client, owner: str, name: str, connection: str, stored_path: Path, reuse: bool
 ) -> list[dict[str, Any]]:
-    query = _LIST_QUERY % {"connection": connection, "node": node}
     is_pr = connection == "pullRequests"
-    items: list[dict[str, Any]] = []
+    listing: list[dict[str, Any]] = []
     cursor: str | None = None
     while True:
-        variables = {"owner": owner, "name": name, "first": page_size, "cursor": cursor}
-        try:
-            page = client.graphql(query, variables)["repository"][connection]
-        except TransientGitHubError:
-            # GitHub times a query out after ten seconds; a page of large pull requests can do
-            # that. Smaller pages get through.
-            if page_size <= 2:
-                raise
-            page_size = max(2, page_size // 2)
-            _log(f"  {connection}: page timed out, retrying with pages of {page_size}")
-            continue
-        for item in page["nodes"]:
-            _flatten(client, item, is_pr)
-            items.append(item)
-        _log(f"  {connection}: {len(items)}/{page['totalCount']}")
+        variables = {"owner": owner, "name": name, "cursor": cursor}
+        page = client.graphql(_IDS_QUERY % {"connection": connection}, variables)["repository"][connection]
+        listing.extend(page["nodes"])
         if not page["pageInfo"]["hasNextPage"]:
-            return items
+            break
         cursor = page["pageInfo"]["endCursor"]
+
+    stored = {}
+    if reuse and stored_path.exists():
+        stored = {item["id"]: item for item in read_jsonl(stored_path)}
+    query = _NODE_QUERY % {
+        "type": "PullRequest" if is_pr else "Issue",
+        "node": _PR_NODE if is_pr else _ISSUE_NODE,
+    }
+
+    def load(entry: dict[str, Any]) -> dict[str, Any] | None:
+        kept = stored.get(entry["id"])
+        if kept and kept["updatedAt"] == entry["updatedAt"]:
+            return kept
+        item = client.graphql(query, {"id": entry["id"]})["node"]
+        if item:  # None if it was deleted between the two passes
+            _flatten(client, item, is_pr)
+        return item
+
+    items: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        for done, item in enumerate(pool.map(load, listing), start=1):
+            if item:
+                items.append(item)
+            if done % 100 == 0 or done == len(listing):
+                _log(f"  {connection}: {done}/{len(listing)}")
+    fetched = sum(1 for item in items if stored.get(item["id"]) is not item)
+    _log(f"  {connection}: {fetched} fetched, {len(items) - fetched} unchanged since the last fetch")
+    return items
 
 
 def _flatten(client: Client, item: dict[str, Any], is_pr: bool) -> None:
@@ -266,7 +320,6 @@ def _flatten(client: Client, item: dict[str, Any], is_pr: bool) -> None:
         events.extend(more["nodes"])
         info = more["pageInfo"]
     item["timeline"] = events
-
     item["labels"] = [label["name"] for label in item["labels"]["nodes"]]
     item["assignees"] = [user["login"] for user in item["assignees"]["nodes"]]
     item["comments"] = item["comments"]["totalCount"]
@@ -277,7 +330,9 @@ def _flatten(client: Client, item: dict[str, Any], is_pr: bool) -> None:
     paths = list(files["nodes"])
     info = files["pageInfo"]
     while info["hasNextPage"] and len(paths) < MAX_FILES:
-        more = client.graphql(_MORE_FILES_QUERY, {"id": item["id"], "cursor": info["endCursor"]})["node"]["files"]
+        more = client.graphql(_MORE_FILES_QUERY, {"id": item["id"], "cursor": info["endCursor"]})["node"][
+            "files"
+        ]
         paths.extend(more["nodes"])
         info = more["pageInfo"]
     item["files"] = paths
