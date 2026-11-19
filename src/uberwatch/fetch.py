@@ -11,6 +11,13 @@ second loads each item that is new or has changed since the copy on disk, ONE IT
 a few requests at a time. A first fetch therefore costs one request per item; later ones cost
 about one per item touched since.
 
+Each request costs one point of GitHub's 5,000-an-hour GraphQL budget, so a repository with more
+than about 5,000 items cannot be fetched for the first time inside one hour: the fetch stops
+when the budget runs out, keeps what it has, and carries on when run again after the reset. To
+see what is left, read `rateLimit { remaining }` from a query or the `X-RateLimit-Remaining`
+response header. `gh api rate_limit` reported 3,354 points remaining for `graphql` at a moment
+when that header said 0, so it is not to be trusted for this.
+
 Do not batch the second pass. Selecting `timelineItems` for many items in one request, whether
 inside `repository.issues(first: 50)` or `nodes(ids: [...50 ids])`, silently returns incomplete
 timelines: the newest events are left out, `hasNextPage` is false, and for issues even
@@ -217,8 +224,8 @@ MAX_FILES = 1000
 # Bump when the selection changes, so copies fetched with the old one are not reused.
 RAW_SCHEMA = 2
 
-# Simultaneous requests. GitHub's secondary rate limit allows many more, but this is polite and
-# already finishes a thousand items in about a minute.
+# Simultaneous requests. Six fetched 2,600 items in four minutes without tripping GitHub's
+# secondary (too fast) rate limit; the client backs off and carries on if that ever changes.
 WORKERS = 6
 
 
@@ -238,8 +245,8 @@ def fetch_repo(
         meta["fetchedAt"] = datetime.now(UTC).isoformat(timespec="seconds")
         meta["schema"] = RAW_SCHEMA
 
-        issues = _fetch_all(client, owner, name, "issues", raw / "issues.jsonl", reuse)
-        pulls = _fetch_all(client, owner, name, "pullRequests", raw / "pulls.jsonl", reuse)
+        issues = _fetch_all(client, owner, name, "issues", raw / "issues.jsonl", reuse, full)
+        pulls = _fetch_all(client, owner, name, "pullRequests", raw / "pulls.jsonl", reuse, full)
     finally:
         if own_client:
             client.close()
@@ -248,6 +255,8 @@ def fetch_repo(
     _write_jsonl(raw / "issues.jsonl", issues)
     _write_jsonl(raw / "pulls.jsonl", pulls)
     (raw / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    for partial in raw.glob("*.partial-v*.jsonl"):
+        partial.unlink()
     _log(
         f"{repo}: {len(issues)} issues, {len(pulls)} pull requests, "
         f"{client.requests} requests, {client.rate_remaining} left on the rate limit"
@@ -263,7 +272,7 @@ def _stored_schema(raw: Path) -> int | None:
 
 
 def _fetch_all(
-    client: Client, owner: str, name: str, connection: str, stored_path: Path, reuse: bool
+    client: Client, owner: str, name: str, connection: str, stored_path: Path, reuse: bool, full: bool
 ) -> list[dict[str, Any]]:
     is_pr = connection == "pullRequests"
     listing: list[dict[str, Any]] = []
@@ -276,9 +285,16 @@ def _fetch_all(
             break
         cursor = page["pageInfo"]["endCursor"]
 
-    stored = {}
+    # Items fetched by a run that then failed (a network drop, the rate limit) are kept in a
+    # side file and picked up here, so the next run carries on instead of starting again.
+    partial_path = stored_path.with_name(f"{stored_path.stem}.partial-v{RAW_SCHEMA}.jsonl")
+    stored: dict[str, dict[str, Any]] = {}
     if reuse and stored_path.exists():
         stored = {item["id"]: item for item in read_jsonl(stored_path)}
+    if full:
+        partial_path.unlink(missing_ok=True)
+    elif partial_path.exists():
+        stored.update({item["id"]: item for item in read_jsonl(partial_path, skip_bad_lines=True)})
     query = _NODE_QUERY % {
         "type": "PullRequest" if is_pr else "Issue",
         "node": _PR_NODE if is_pr else _ISSUE_NODE,
@@ -294,10 +310,12 @@ def _fetch_all(
         return item
 
     items: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+    with partial_path.open("a") as partial, ThreadPoolExecutor(max_workers=WORKERS) as pool:
         for done, item in enumerate(pool.map(load, listing), start=1):
             if item:
                 items.append(item)
+                if stored.get(item["id"]) is not item:
+                    partial.write(json.dumps(item, ensure_ascii=False) + "\n")
             if done % 100 == 0 or done == len(listing):
                 _log(f"  {connection}: {done}/{len(listing)}")
     fetched = sum(1 for item in items if stored.get(item["id"]) is not item)
@@ -308,7 +326,7 @@ def _fetch_all(
 def _flatten(client: Client, item: dict[str, Any], is_pr: bool) -> None:
     """Replace the paged connections on one item with plain lists, fetching any further pages."""
     timeline = item.pop("timelineItems")
-    events = list(timeline["nodes"])
+    events = [node for node in timeline["nodes"] if node]
     info = timeline["pageInfo"]
     while info["hasNextPage"]:
         query = _MORE_TIMELINE_QUERY % {
@@ -317,7 +335,7 @@ def _flatten(client: Client, item: dict[str, Any], is_pr: bool) -> None:
             "timeline": _PR_TIMELINE if is_pr else _COMMON_TIMELINE,
         }
         more = client.graphql(query, {"id": item["id"], "cursor": info["endCursor"]})["node"]["timelineItems"]
-        events.extend(more["nodes"])
+        events.extend(node for node in more["nodes"] if node)
         info = more["pageInfo"]
     item["timeline"] = events
     item["labels"] = [label["name"] for label in item["labels"]["nodes"]]
@@ -326,19 +344,21 @@ def _flatten(client: Client, item: dict[str, Any], is_pr: bool) -> None:
     if not is_pr:
         return
 
-    files = item.pop("files")
-    paths = list(files["nodes"])
+    # GitHub returns null for the file list of some pull requests (seen on obophenotype/uberon,
+    # where the diff is presumably too large to compute).
+    files = item.pop("files") or {"nodes": [], "pageInfo": {"hasNextPage": False}, "totalCount": None}
+    paths = [node for node in files["nodes"] if node]
     info = files["pageInfo"]
     while info["hasNextPage"] and len(paths) < MAX_FILES:
         more = client.graphql(_MORE_FILES_QUERY, {"id": item["id"], "cursor": info["endCursor"]})["node"][
             "files"
         ]
-        paths.extend(more["nodes"])
+        paths.extend(node for node in more["nodes"] if node)
         info = more["pageInfo"]
     item["files"] = paths
     item["filesTotal"] = files["totalCount"]
 
-    commits = item.pop("commits")
+    commits = item.pop("commits") or {"totalCount": 0, "nodes": []}
     item["commitsTotal"] = commits["totalCount"]
     item["commits"] = [
         {
@@ -346,11 +366,14 @@ def _flatten(client: Client, item: dict[str, Any], is_pr: bool) -> None:
             "authors": [
                 {"name": author["name"], "login": (author["user"] or {}).get("login")}
                 for author in node["commit"]["authors"]["nodes"]
+                if author
             ],
         }
         for node in commits["nodes"]
+        if node
     ]
-    item["closingIssues"] = [ref["number"] for ref in item.pop("closingIssuesReferences")["nodes"]]
+    closing = item.pop("closingIssuesReferences") or {"nodes": []}
+    item["closingIssues"] = [ref["number"] for ref in closing["nodes"] if ref]
 
 
 def _write_jsonl(path: Path, items: list[dict[str, Any]]) -> None:
@@ -361,9 +384,19 @@ def _write_jsonl(path: Path, items: list[dict[str, Any]]) -> None:
     tmp.replace(path)
 
 
-def read_jsonl(path: Path) -> list[dict[str, Any]]:
+def read_jsonl(path: Path, *, skip_bad_lines: bool = False) -> list[dict[str, Any]]:
+    """`skip_bad_lines` is for a file a crashed run may have left with half a line at its end."""
+    items = []
     with path.open() as lines:
-        return [json.loads(line) for line in lines if line.strip()]
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                items.append(json.loads(line))
+            except ValueError:
+                if not skip_bad_lines:
+                    raise
+    return items
 
 
 def _log(message: str) -> None:
