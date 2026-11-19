@@ -78,6 +78,15 @@ uv run pytest
 uv run ruff check . && uv run ruff format .
 ```
 
+The page's JavaScript has no tests, so after changing anything in `templates/`, rebuild and
+look. Three bugs in the first version only showed up this way:
+
+- Build a second repository as well as Babel. One with a long history and few milestones
+  (`obophenotype/uberon`) breaks charts that Babel does not.
+- Load the page at desktop and at phone width, and in the light and dark themes. A chart that
+  failed shows "This chart could not be drawn" in its card and logs the error to the console.
+- At phone width the page itself must not scroll sideways.
+
 ## Things that will bite you
 
 - **Never fetch timelines for several items in one request.** GitHub silently returns
