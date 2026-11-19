@@ -131,8 +131,12 @@ def backlog_by_milestone(
     return rows
 
 
-def cohort_labeller(first_year: int, last_year: int, most: int = 8):
-    """Group creation years into at most `most` cohorts of equal width."""
+def cohort_labeller(first_year: int, last_year: int, most: int = 5):
+    """Group creation years into at most `most` cohorts of equal width.
+
+    Five, because cohorts are drawn as steps of one hue, and five is as many steps as stay
+    tellable apart between the lightest blue that shows on the page and the darkest.
+    """
     width = math.ceil((last_year - first_year + 1) / most)
 
     def label(year: int) -> str:
@@ -300,9 +304,12 @@ def milestone_flow(
     def band(issue: Item, when: datetime) -> str | None:
         return config.bucket(issue.milestone_at(when)) if issue.is_open_at(when) else None
 
-    # Skip the early snapshots that predate any real backlog.
-    while len(times) > 2 and sum(i.is_open_at(times[0]) for i in issues) < smallest:
-        times = times[1:]
+    # Skip the early snapshots that predate any real backlog: a column a twelfth the height
+    # of the tallest is a sliver nobody can read, and it costs a column's width.
+    open_at = [sum(i.is_open_at(when) for i in issues) for when in times]
+    floor = max(smallest, max(open_at) / 12)
+    while len(times) > 2 and open_at[0] < floor:
+        times, open_at = times[1:], open_at[1:]
 
     links: Counter[tuple[tuple[int, str], tuple[int, str]]] = Counter()
     for column in range(len(times) - 1):
@@ -572,6 +579,7 @@ def item_rows(items: list[Item], config: RepoConfig, now: datetime) -> list[dict
             else:
                 row["outcome"] = "Merged" if item.state == "merged" else "Closed unmerged"
             row["ready"] = day(item.ready_at) if item.started_as_draft else None
+            row["draft"] = item.started_as_draft
             row["assisted"] = ASSISTANCE[item.assisted]
             row["size"] = item.additions + item.deletions
         rows.append(row)
