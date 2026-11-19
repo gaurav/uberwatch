@@ -4,13 +4,13 @@ Watching Uberon grow: graphs of how issues and pull requests move through a GitH
 
 The goal is an automatically updated dashboard of how people change
 [Uberon](https://github.com/obophenotype/uberon), as a baseline before LLM-based tools are brought
-into that process. The tools that read a repository's history are not specific to Uberon, and the
-first repository they were built against is
+into that process. The tools that read and graph a repository's history are not specific to
+Uberon, and the first repository they were built against is
 [NCATSTranslator/Babel](https://github.com/NCATSTranslator/Babel).
 
-**Status: the first layer only.** It fetches a repository's issue and pull request history and
-replays it, so that any item can be asked what state it was in on a past date. Nothing is drawn
-or published yet; see [What is not here yet](#what-is-not-here-yet).
+**Status: a rough first version.** It fetches a repository's history and builds a dashboard on
+your own machine. Nothing is published and nothing runs on a schedule yet; see
+[What is not here yet](#what-is-not-here-yet).
 
 ## Use
 
@@ -18,8 +18,11 @@ Needs [uv](https://docs.astral.sh/uv/) and a GitHub token: `GH_TOKEN` or `GITHUB
 environment, or a logged-in `gh` CLI.
 
 ```sh
-uv run uberwatch fetch NCATSTranslator/Babel
+uv run uberwatch all NCATSTranslator/Babel     # fetch, then build
+open data/NCATSTranslator/Babel/site/index.html
 ```
+
+`all` is `fetch` followed by `build`; either can be run on its own. `build` needs no network.
 
 The first fetch costs one API request per issue and pull request (about 1,300 for Babel, 3,800
 for Uberon, against GitHub's 5,000 an hour). Later fetches only re-request items whose
@@ -33,33 +36,42 @@ Everything is written under `data/`, which git ignores:
 data/<owner>/<repo>/raw/issues.jsonl   one issue per line, with its timeline
 data/<owner>/<repo>/raw/pulls.jsonl    one pull request per line, with timeline, files, commits
 data/<owner>/<repo>/raw/meta.json      fetch time, milestones, labels, GitHub's own totals
+data/<owner>/<repo>/dashboard.json     every chart's data
+data/<owner>/<repo>/site/index.html    the dashboard, with that data embedded
 ```
 
-To read it back with its history replayed:
+## What the dashboard shows
 
-```python
-from datetime import UTC, datetime
-from pathlib import Path
+| Section | Charts |
+|---|---|
+| Accumulation | open issues and pull requests over time; opened against closed per week; the open backlog split by milestone, and by the year issues were opened |
+| Lifelines | every issue and pull request as a line from opened to closed; open issues by age against time since the last comment |
+| Speed | the share of items still open N days after opening (survival curves); days to merge; who had reviewed a pull request when it merged; open pull requests by where they are waiting |
+| Flow | where each milestone's open issues were a year later; what became of the issues put in each release milestone; how issues were closed |
+| Where | issues by label; merged pull requests by the part of the tree they touched |
+| Who | activity by person and year; who reviews whom; pull requests that name an LLM tool |
 
-from uberwatch.events import load_items
-
-items = load_items(Path("data/NCATSTranslator/Babel/raw"))
-then = datetime(2025, 1, 1, tzinfo=UTC)
-open_then = [item for item in items if item.kind == "issue" and item.is_open_at(then)]
-print(len(open_then), "issues were open;", open_then[0].milestone_at(then))
-```
+Each chart has a legend, a tooltip and a data table, and the page follows the system's light or
+dark theme.
 
 ## How it works
 
-Two stages, one module each in `src/uberwatch/`:
+Four stages, one module each in `src/uberwatch/`:
 
 1. **`fetch.py`** downloads every issue and pull request with its timeline over GitHub's GraphQL
    API.
 2. **`events.py`** replays each timeline. GitHub only reports what an item looks like now; the
    timeline says what happened to it, so replaying it gives the spans during which the item was
    open, which milestone it was in, and when a pull request stopped being a draft. Each replay
-   is checked against the item's present state, and `Item.mismatches` says where they disagree.
-   It also marks each pull request as a bot's, as naming an LLM tool, or as neither.
+   is checked against the item's present state.
+3. **`metrics.py`** turns the replayed items into each chart's rows. These are pure functions,
+   and `now` is the time of the fetch, so the same data always builds the same dashboard.
+4. **`render.py`** writes the page from `templates/`. Charts are drawn in the browser with
+   [Observable Plot](https://observablehq.com/plot/) and d3-sankey, loaded from a CDN.
+
+`repos.toml` holds per-repository settings: how milestones are grouped into the bands the
+backlog and flow charts use, which accounts are bots, how deep a path counts as an "area". A
+repository with no entry gets its six busiest milestones as bands.
 
 ```sh
 uv run pytest
@@ -71,23 +83,23 @@ uv run ruff check . && uv run ruff format .
 - **Never fetch timelines for several items in one request.** GitHub silently returns
   incomplete timelines when they are batched, with nothing in the response to show it. The
   details are at the top of `fetch.py`. This is why a first fetch is one request per item.
-- **The replay is the fetch's test.** If many items have `mismatches`, suspect the fetch. A few
-  are normal: a milestone renamed or deleted after issues were put in it, or a very old issue
-  whose closing GitHub never recorded as an event.
+- **The replay is the fetch's test.** If `build` reports many items whose replay does not end
+  in their present state, suspect the fetch. A few are normal: a milestone renamed or deleted
+  after issues were put in it.
 - **Milestone events carry the title at the time.** A renamed milestone appears in the history
-  under both names.
+  under both names, so the patterns in `repos.toml` have to match the old names too.
 - **"Names an LLM tool" is a rough signal.** It means a commit co-author or the pull request
   description mentions one. Work done with a tool that left no such trace is not counted.
 
 ## What is not here yet
 
-- Charts. Nothing here draws or summarises the history.
-- A GitHub Action that fetches daily and publishes to GitHub Pages. Fetching only changed items
-  was built with this in mind; the stored raw data will need a home between runs (a branch or a
-  cache), since the default Actions token gets 1,000 requests an hour.
-- Which parts of the ontology a change touches. The fetch records the files each pull request
-  changed, which for Uberon is nearly always the one edit file; the real answer needs the terms
-  changed in each diff.
+- A GitHub Action that rebuilds the dashboard daily and publishes it to GitHub Pages. Fetching
+  only changed items was built with this in mind; the stored raw data will need a home between
+  runs (a branch or a cache), since the default Actions token gets 1,000 requests an hour.
+- Which parts of the ontology a change touches. Today's "where" chart groups changed files by
+  directory, which for Uberon is nearly always the one edit file; the real answer needs the
+  terms changed in each diff.
 - GitHub Projects. Babel's issues also move through a project board's status column, and those
   events are in the timeline, but reading them needs a token with the `read:project` scope.
-- A library other repositories can install.
+- A library other repositories can install. The fetch and replay layers are the likeliest to
+  survive a rewrite; the charts are a first guess at what is worth looking at.
