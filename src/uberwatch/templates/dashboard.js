@@ -93,6 +93,13 @@
   // Bars are capped at 24px; the rest of each slot is left as air.
   const barInset = (plotWidth, count) => Math.max(1, (plotWidth / Math.max(1, count) - 24) / 2);
 
+  // The gap between hundreds of thin bars: half a pixel a side where there is room, none where
+  // the bars are already under two pixels wide (a fixed inset would erase them on a phone).
+  function hairGap(plotWidth, count) {
+    const inset = plotWidth / Math.max(1, count) >= 2 ? 0.5 : 0;
+    return { insetLeft: inset, insetRight: inset };
+  }
+
   // Every period label from the first item to now, so an empty quarter still gets its column.
   function coarsePeriods() {
     const unit = DATA.units.coarse;
@@ -196,13 +203,14 @@
 
     flowIssue(width) {
       const rows = FLOW.issue;
+      const gap = hairGap(width, rows.length);
       return {
         node: plot({
           width, height: 260,
           x: { label: null }, y: { label: "issues", grid: true, tickFormat: (v) => Math.abs(v) },
           marks: [
-            Plot.rect(rows, { x1: "start", x2: "end", y1: 0, y2: "opened", fill: C.series[0], insetLeft: 0.5, insetRight: 0.5 }),
-            Plot.rect(rows, { x1: "start", x2: "end", y1: 0, y2: (d) => -d.closed, fill: C.series[1], insetLeft: 0.5, insetRight: 0.5 }),
+            Plot.rect(rows, { x1: "start", x2: "end", y1: 0, y2: "opened", fill: C.series[0], ...gap }),
+            Plot.rect(rows, { x1: "start", x2: "end", y1: 0, y2: (d) => -d.closed, fill: C.series[1], ...gap }),
             Plot.ruleY([0], { stroke: C.axis }),
             ...crosshair(rows, (d) => new Date((+d.start + +d.end) / 2),
               (d) => `${d.period}\n${d.opened} opened\n${d.closed} closed\n${d.open} open at the end`),
@@ -215,14 +223,15 @@
 
     flowPr(width) {
       const rows = FLOW.pr;
+      const gap = hairGap(width, rows.length);
       return {
         node: plot({
           width, height: 260,
           x: { label: null }, y: { label: "pull requests", grid: true, tickFormat: (v) => Math.abs(v) },
           marks: [
-            Plot.rect(rows, { x1: "start", x2: "end", y1: 0, y2: "opened", fill: C.series[0], insetLeft: 0.5, insetRight: 0.5 }),
-            Plot.rect(rows, { x1: "start", x2: "end", y1: 0, y2: (d) => -d.merged, fill: C.series[1], insetLeft: 0.5, insetRight: 0.5 }),
-            Plot.rect(rows, { x1: "start", x2: "end", y1: (d) => -d.merged, y2: (d) => -d.closed, fill: C.series[2], insetLeft: 0.5, insetRight: 0.5 }),
+            Plot.rect(rows, { x1: "start", x2: "end", y1: 0, y2: "opened", fill: C.series[0], ...gap }),
+            Plot.rect(rows, { x1: "start", x2: "end", y1: 0, y2: (d) => -d.merged, fill: C.series[1], ...gap }),
+            Plot.rect(rows, { x1: "start", x2: "end", y1: (d) => -d.merged, y2: (d) => -d.closed, fill: C.series[2], ...gap }),
             Plot.ruleY([0], { stroke: C.axis }),
             ...crosshair(rows, (d) => new Date((+d.start + +d.end) / 2),
               (d) => `${d.period}\n${d.opened} opened\n${d.merged} merged\n${d.closed - d.merged} closed unmerged\n${d.open} open at the end`),
