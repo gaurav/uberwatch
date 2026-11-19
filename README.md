@@ -99,6 +99,16 @@ uv run ruff check . && uv run ruff format .
 - Which parts of the ontology a change touches. Today's "where" chart groups changed files by
   directory, which for Uberon is nearly always the one edit file; the real answer needs the
   terms changed in each diff.
+- Settings for Uberon. The dashboard builds for it, but nothing in `repos.toml` is tuned yet:
+  - Uberon hardly uses milestones (four, all from 2013–14), so the milestone charts say almost
+    nothing. Its issues move through labels instead (`Stale`, `autoclosed-unfixed`), and there
+    is no chart of label history yet, though the label events are fetched.
+  - `dragon-ai-agent` is an ordinary user account that looks to be driven by an LLM, going by
+    its name and by most of its pull requests naming an LLM tool. It is not in `bots`, so it
+    counts as a person in the review and people charts.
+  - Two days dominate its history: 403 issues migrated from SourceForge were closed on
+    3 July 2015, and 396 were closed as `autoclosed-unfixed` on 3 August 2021. Both are real,
+    and both flatten every other month on the opened-and-closed chart.
 - GitHub Projects. Babel's issues also move through a project board's status column, and those
   events are in the timeline, but reading them needs a token with the `read:project` scope.
 - A library other repositories can install. The fetch and replay layers are the likeliest to
