@@ -1,0 +1,9 @@
+# /data/ is used as a scratch directory
+/data/
+
+# Python
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
