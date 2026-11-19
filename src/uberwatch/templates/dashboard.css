@@ -99,10 +99,11 @@ h3 { margin: 0; font-size: 15px; font-weight: 600; text-wrap: balance; }
 .chart a:hover line, .chart a:hover circle { stroke-width: 3px; }
 
 .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 10px; font-size: 13px; color: var(--text-secondary); }
-.legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* A label may wrap: a long one that could not would push the whole page wider than a phone. */
+.legend span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
 .legend i.line { height: 3px; border-radius: 2px; width: 16px; }
-.legend .ramp { width: 120px; height: 10px; border-radius: 3px; }
+.legend .ramp { width: 120px; height: 10px; border-radius: 3px; flex: none; }
 
 details { margin-top: 10px; font-size: 13px; color: var(--text-secondary); }
 summary { cursor: pointer; width: fit-content; }
