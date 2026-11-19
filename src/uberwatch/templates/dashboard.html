@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}} issue and pull request flow</title>
+<style>
+/*{{CSS}}*/
+</style>
+</head>
+<body>
+<header class="page-head">
+  <p class="eyebrow">uberwatch</p>
+  <h1><a id="repo-link" href="#">{{TITLE}}</a>: how issues and pull requests move</h1>
+  <p class="lede" id="fetched"></p>
+  <nav id="toc" aria-label="Sections"></nav>
+</header>
+
+<main>
+  <section class="tiles" id="tiles" aria-label="Headline numbers"></section>
+
+  <section id="accumulation">
+    <h2>Accumulation</h2>
+    <article class="card" data-chart="openCount">
+      <h3>Open issues and pull requests over time</h3>
+      <p class="note">The number open at the end of each <span data-unit="fine"></span>.</p>
+    </article>
+    <article class="card" data-chart="flowIssue">
+      <h3>Issues opened and closed per <span data-unit="fine"></span></h3>
+      <p class="note">Above the line: issues opened or reopened. Below: issues closed. The backlog grows whenever the top outweighs the bottom.</p>
+    </article>
+    <article class="card" data-chart="flowPr">
+      <h3>Pull requests opened and closed per <span data-unit="fine"></span></h3>
+      <p class="note">Below the line, pull requests that merged are separated from those closed without merging.</p>
+    </article>
+    <article class="card" data-chart="backlogMilestone">
+      <h3>Open issues by milestone</h3>
+      <p class="note">Each open issue is counted in the milestone it was in on that date, replayed from its history, not the one it is in today.</p>
+    </article>
+    <article class="card" data-chart="backlogVintage">
+      <h3>Open issues by when they were opened</h3>
+      <p class="note">A band that keeps its height is a set of old issues nobody is closing; a band that thins is being worked off.</p>
+    </article>
+  </section>
+
+  <section id="lifelines">
+    <h2>Lifelines</h2>
+    <article class="card" data-chart="lifelineIssue">
+      <h3>Every issue, from opened to closed</h3>
+      <p class="note">One line per issue, in the order they were opened. A line that reaches the right edge is still open. Hover for the title; click to open it on GitHub.</p>
+    </article>
+    <article class="card" data-chart="lifelinePr">
+      <h3>Every pull request, from opened to merged or closed</h3>
+      <p class="note">The faint first stretch of a line is the time it spent as a draft.</p>
+    </article>
+    <article class="card" data-chart="stale">
+      <h3>Open issues: age against time since anyone commented</h3>
+      <p class="note">On the diagonal, nobody has ever commented. Far below it, an old issue is being discussed again. Both axes are logarithmic.</p>
+    </article>
+  </section>
+
+  <section id="speed">
+    <h2>Speed</h2>
+    <div class="pair">
+      <article class="card" data-chart="survivalIssue">
+        <h3>Share of issues still open, by days since opening</h3>
+        <p class="note">Grouped by the year opened. Unlike a median time to close, issues that are still open count.</p>
+      </article>
+      <article class="card" data-chart="survivalPr">
+        <h3>Share of pull requests still open, by days since opening</h3>
+        <p class="note">Until merged or closed, whichever came first.</p>
+      </article>
+    </div>
+    <article class="card" data-chart="mergeTime">
+      <h3>Days from opening to merge</h3>
+      <p class="note">Median, with the middle half of pull requests shaded, by the <span data-unit="coarse"></span> they merged in. Bot-authored pull requests are left out.</p>
+    </article>
+    <article class="card" data-chart="coverage">
+      <h3>Who had reviewed a pull request when it merged</h3>
+      <p class="note">A review by the author, or by a bot such as Copilot, does not count as a person's review. Bot-authored pull requests are left out.</p>
+    </article>
+    <article class="card" data-chart="waiting">
+      <h3>Open pull requests, by where they are waiting</h3>
+      <p class="note">Each dot is a pull request, placed by how long it has been open. Hover for the title; click to open it.</p>
+    </article>
+  </section>
+
+  <section id="flow">
+    <h2>Flow</h2>
+    <article class="card" data-chart="alluvial">
+      <h3>Where each milestone's open issues went by the next snapshot</h3>
+      <p class="note">Columns are snapshots of the open backlog. Between them, issues opened in the period enter from the grey block at the top and issues closed in it leave to the grey block at the bottom.</p>
+    </article>
+    <article class="card" data-chart="outcomes">
+      <h3>What became of the issues put in each release or deadline milestone</h3>
+      <p class="note">In the order the milestones were first used. "Moved out" is an issue carried to another milestone, or dropped from this one, while still open.</p>
+    </article>
+    <article class="card" data-chart="closure">
+      <h3>How issues were closed</h3>
+      <p class="note">By the year of closing. "By a pull request or commit" means GitHub recorded one as the closer.</p>
+    </article>
+  </section>
+
+  <section id="where">
+    <h2>Where</h2>
+    <article class="card" data-chart="labelHeat">
+      <h3>Issues opened per <span data-unit="coarse"></span>, by label</h3>
+      <p class="note">By the labels issues carry today.</p>
+    </article>
+    <article class="card" data-chart="labelState">
+      <h3>Open and closed issues by label</h3>
+    </article>
+    <article class="card" data-chart="pathHeat">
+      <h3>Merged pull requests per <span data-unit="coarse"></span>, by the part of the tree they touched</h3>
+      <p class="note">A pull request counts once for each area it changes.</p>
+    </article>
+  </section>
+
+  <section id="who">
+    <h2>Who</h2>
+    <article class="card" data-chart="people">
+      <h3>Activity by person and year</h3>
+      <p class="note">The busiest accounts; everyone else is combined in the last row. The scale is compressed so that small counts still show.</p>
+    </article>
+    <article class="card" data-chart="reviewPairs">
+      <h3>Who reviews whose pull requests</h3>
+      <p class="note">Pull requests by the author on the left that the reviewer on the right reviewed at least once.</p>
+    </article>
+    <article class="card" data-chart="assistance">
+      <h3>Pull requests opened per <span data-unit="coarse"></span>, by whether an LLM tool is named</h3>
+      <p class="note">A rough signal: "names an LLM tool" means a commit co-author or the description mentions one (Claude, Copilot, Codex and the like). Work that used a tool without saying so is counted as not naming one.</p>
+    </article>
+  </section>
+</main>
+
+<footer class="page-foot" id="checks"></footer>
+
+<script type="application/json" id="data">/*{{DATA}}*/</script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.17/dist/plot.umd.min.js"></script>
+<script>
+/*{{JS}}*/
+</script>
+</body>
+</html>
