@@ -380,6 +380,7 @@
 
     outcomes(width) {
       const rows = DATA.milestoneOutcomes;
+      if (!rows.length) return { node: message("No milestones here beyond the ones charted as bands above.") };
       const names = [...new Set(rows.map((d) => d.milestone))];
       const order = ["Closed in it", "Moved out, still open", "Still open in it"];
       const color = { domain: order, range: [C.series[1], C.series[2], C.series[0]] };
@@ -461,19 +462,33 @@
       const years = [...new Set(rows.map((d) => d.year))].sort();
       const max = d3.max(rows, (d) => d.count) || 1;
       const bots = new Set(DATA.people.bots);
-      const chartWidth = Math.max(width, 190 + roles.length * years.length * 26);
-      return {
-        node: plot({
-          width: chartWidth, height: 70 + DATA.people.order.length * 24, marginLeft: 190, marginTop: 34,
+      const LABELS = 190;
+      const CELL = 22; // the narrowest a year's cell that is still worth putting side by side
+      const ROOMY = 30; // what a cell gets when the roles are stacked and width is not scarce
+      // One grid of `shown` roles side by side. Plot shrinks an SVG wider than its card, which
+      // makes the counts unreadable, so a grid is never asked to be wider than the card.
+      const grid = (shown, gridWidth) =>
+        plot({
+          width: gridWidth, height: 70 + DATA.people.order.length * 24, marginLeft: LABELS, marginTop: 34,
           color: { type: "sqrt", domain: [0, max], interpolate: sequential() },
-          fx: { domain: roles, label: null, padding: 0.05 },
+          fx: { domain: shown, label: null, padding: 0.05 },
           x: { domain: years, label: null, tickSize: 0, tickFormat: (y) => "’" + y.slice(2) },
           y: { domain: DATA.people.order, label: null, tickSize: 0, tickFormat: (login) => (bots.has(login) ? login + " (bot)" : login) },
           marks: [
-            Plot.cell(rows, { fx: "role", x: "year", y: "login", fill: "count", inset: 1, rx: 2, title: (d) => `${d.login}, ${d.year}\n${d.role}: ${d.count}`, tip: TIP() }),
-            Plot.text(rows, { fx: "role", x: "year", y: "login", text: "count", fontSize: 9.5, fill: (d) => (Math.sqrt(d.count / max) > 0.5 ? C.onHigh : C.text), pointerEvents: "none" }),
+            Plot.cell(rows.filter((d) => shown.includes(d.role)), { fx: "role", x: "year", y: "login", fill: "count", inset: 1, rx: 2, title: (d) => `${d.login}, ${d.year}\n${d.role}: ${d.count}`, tip: TIP() }),
+            Plot.text(rows.filter((d) => shown.includes(d.role)), { fx: "role", x: "year", y: "login", text: "count", fontSize: 9.5, fill: (d) => (Math.sqrt(d.count / max) > 0.5 ? C.onHigh : C.text), pointerEvents: "none" }),
           ],
-        }),
+        });
+      // A short history fits every role in one row. A long one (Uberon has twenty years) gets
+      // as many roles per row as fit at a readable cell width, and at least one.
+      const perRow = Math.max(1, Math.min(roles.length, Math.floor((width - LABELS) / (years.length * CELL))));
+      const node = document.createElement("div");
+      for (let i = 0; i < roles.length; i += perRow) {
+        const shown = roles.slice(i, i + perRow);
+        node.append(grid(shown, perRow === roles.length ? width : Math.min(width, LABELS + shown.length * years.length * ROOMY)));
+      }
+      return {
+        node,
         legend: { ramp: C.seq, max, label: "events in the year" },
         table: rows.map((d) => ({ account: d.login, year: d.year, activity: d.role, count: d.count })),
       };
