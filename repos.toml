@@ -1,0 +1,27 @@
+# Per-repository settings for the dashboard. A repository with no entry gets the defaults:
+# its busiest milestones as their own bands, changed files grouped by top-level directory.
+
+[defaults]
+# Accounts to treat as bots even though GitHub types them as users. Anything GitHub types as a
+# Bot, or whose login ends in "[bot]", is already one.
+bots = ["dependabot", "github-actions", "copilot-pull-request-reviewer", "Copilot"]
+# How many leading path components make an "area" in the where-do-changes-land chart.
+path_depth = 1
+
+["NCATSTranslator/Babel"]
+path_depth = 1
+# Milestones grouped into bands, first match wins, in stacking order. The patterns cover the
+# titles milestones used to have as well: timeline events record the title at the time.
+# Anything in a milestone that matches nothing lands in `other_milestones`.
+milestone_buckets = [
+  { name = "Critical", match = "^(Critical|Immediate|Urgent)$" },
+  { name = "Needed soon", match = "^Needed soon$" },
+  { name = "Needed later", match = "^Needed later$" },
+  { name = "Not urgent", match = "^(Not urgent|Non-urgent issues|Babel - not-urgent)$" },
+  { name = "Upstream", match = "^Upstream$" },
+  { name = "Triage, tests, requests", match = "^(Needs |Issues needing|Babel - issues needing|Improved testing|Requests for|Babel - requests for)" },
+]
+other_milestones = "Releases and deadlines"
+
+["obophenotype/uberon"]
+path_depth = 2
