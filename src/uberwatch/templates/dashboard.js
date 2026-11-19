@@ -263,7 +263,7 @@
           x: { label: null }, y: { reverse: true, label: "↓ in the order opened", ticks: 5 },
           marks: [
             Plot.link(ISSUES, { x1: "from", x2: "to", y1: "rank", y2: "rank", stroke: "outcome", strokeWidth: 1, href: "url", target: "_blank" }),
-            Plot.tip(ISSUES, Plot.pointer({ x: "from", y: "rank", title: describe, ...TIP() })),
+            Plot.tip(ISSUES, Plot.pointerY({ x: "from", y: "rank", title: describe, maxRadius: 2000, ...TIP() })),
           ],
         }),
         legend: scaleLegend(color).map((item) => ({ ...item, line: true })),
@@ -284,7 +284,7 @@
           marks: [
             Plot.link(drafts, { x1: "from", x2: "to", y1: "rank", y2: "rank", stroke: state, strokeWidth: 1, strokeOpacity: 0.3, href: "url", target: "_blank" }),
             Plot.link(ready, { x1: "from", x2: "to", y1: "rank", y2: "rank", stroke: state, strokeWidth: 1, href: "url", target: "_blank" }),
-            Plot.tip(PRS, Plot.pointer({ x: "from", y: "rank", title: describe, ...TIP() })),
+            Plot.tip(PRS, Plot.pointerY({ x: "from", y: "rank", title: describe, maxRadius: 2000, ...TIP() })),
           ],
         }),
         legend: [...scaleLegend(color).map((item) => ({ ...item, line: true })), { label: "Faint: while a draft", color: C.neutral, line: true }],
@@ -388,7 +388,7 @@
           width, height: 50 + names.length * 24, marginLeft: 250, color,
           x: { label: "issues →", grid: true }, y: { domain: names, label: null, padding: 0.35 },
           marks: [
-            Plot.barX(rows, {
+            Plot.barX(rows.filter((d) => d.count), {
               y: "milestone", x: "count", fill: "outcome", insetLeft: 1, insetRight: 1,
               title: (d) => `${d.milestone}${d.due ? " (due " + d.due + ")" : ""}\n${d.outcome}: ${d.count}`, tip: TIP(),
             }),
@@ -437,7 +437,7 @@
           width, height: 50 + labels.length * 20, marginLeft: 220, color,
           x: { label: "issues →", grid: true }, y: { domain: labels, label: null, padding: 0.35 },
           marks: [
-            Plot.barX(DATA.labels.state, { y: "label", x: "count", fill: "state", insetLeft: 1, insetRight: 1, title: (d) => `${d.label}\n${d.state}: ${d.count}`, tip: TIP() }),
+            Plot.barX(DATA.labels.state.filter((d) => d.count), { y: "label", x: "count", fill: "state", insetLeft: 1, insetRight: 1, title: (d) => `${d.label}\n${d.state}: ${d.count}`, tip: TIP() }),
             Plot.ruleX([0], { stroke: C.axis }),
           ],
         }),
@@ -543,8 +543,8 @@
         marks: [
           Plot.ruleY([0], { stroke: C.axis }),
           Plot.line(rows, { x: "days", y: "pct", z: "cohort", stroke: "cohort", strokeWidth: 2 }),
-          Plot.dot(rows, Plot.pointer({ x: "days", y: "pct", r: 4, fill: "cohort", stroke: C.surface, strokeWidth: 2 })),
-          Plot.tip(rows, Plot.pointer({ x: "days", y: "pct", ...TIP(), title: (d) => `Opened ${d.cohort} (${d.n} items)\n${d.pct.toFixed(0)}% still open after ${d.days} days` })),
+          Plot.dot(rows, Plot.pointer({ x: "days", y: "pct", r: 4, fill: "cohort", stroke: C.surface, strokeWidth: 2, maxRadius: 120 })),
+          Plot.tip(rows, Plot.pointer({ x: "days", y: "pct", maxRadius: 120, ...TIP(), title: (d) => `Opened ${d.cohort} (${d.n} items)\n${d.pct.toFixed(0)}% still open after ${d.days} days` })),
         ],
       }),
       legend: scaleLegend(color).map((item) => ({ ...item, line: true })),
@@ -566,7 +566,7 @@
         width, height: 280, color,
         x: { label: null }, y: { label: yLabel, grid: true },
         marks: [
-          Plot.rectY(rows, { x1: "start", x2: "end", y: "count", fill: key, insetLeft: inset, insetRight: inset, insetTop: 1, title: (d) => `${d.period}\n${d[key]}: ${d.count}`, tip: TIP() }),
+          Plot.rectY(rows.filter((d) => d.count), { x1: "start", x2: "end", y: "count", fill: key, insetLeft: inset, insetRight: inset, insetTop: 1, title: (d) => `${d.period}\n${d[key]}: ${d.count}`, tip: TIP() }),
           Plot.ruleY([0], { stroke: C.axis }),
         ],
       }),
@@ -593,7 +593,7 @@
         x: { domain: periods, label: null, tickFormat: coarseTick, tickSize: 0 },
         y: { domain: rowsOrder, label: null, tickSize: 0 },
         marks: [
-          Plot.cell(cells, { x: "period", y: key, fill: "count", inset: 1, rx: 2, title: (d) => `${d[key]}\n${d.period}: ${d.count} ${what}`, tip: TIP() }),
+          Plot.cell(cells, { x: "period", y: key, fill: "count", inset: 1, rx: 2, title: (d) => `${d[key]}, ${d.period}\n${what}: ${d.count}`, tip: TIP() }),
         ],
       }),
       legend: { ramp: C.seq, max, label: what + " in the period" },
